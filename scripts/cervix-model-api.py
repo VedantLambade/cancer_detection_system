@@ -13,19 +13,36 @@ from flask_cors import CORS
 from PIL import Image
 import io
 from datetime import datetime
+import requests
 
 app = Flask(__name__)
 CORS(app)
 
 # Model configuration
-MODEL_PATH = os.getenv("MODEL_PATH", "final_cervix_model_optimized.keras")
+MODEL_URL = os.getenv(
+    "MODEL_URL",
+    "https://huggingface.co/VedantJainnnn/cervixnet121/resolve/main/final_cervix_model_optimized.keras"
+)
+MODEL_LOCAL = "final_cervix_model_optimized.keras"
 THRESHOLD = float(os.getenv("PREDICTION_THRESHOLD", "0.55"))
 IMG_SIZE = (288, 288)
 
-# Load model on startup
+# Download model if not exists
+if not os.path.exists(MODEL_LOCAL):
+    try:
+        print("⏳ Downloading model from Hugging Face...")
+        r = requests.get(MODEL_URL, stream=True)
+        with open(MODEL_LOCAL, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print("✅ Model downloaded successfully!")
+    except Exception as e:
+        print(f"❌ Failed to download model: {e}")
+
+# Load model
 try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-    print(f"✅ Model loaded from {MODEL_PATH}")
+    model = tf.keras.models.load_model(MODEL_LOCAL, compile=False)
+    print(f"✅ Model loaded from {MODEL_LOCAL}")
 except Exception as e:
     print(f"❌ Failed to load model: {e}")
     model = None
@@ -79,10 +96,7 @@ def health():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    """
-    Predict cervix image classification.
-    Expects multipart/form-data with 'image' file.
-    """
+    """Predict cervix image classification."""
     try:
         if "image" not in request.files:
             return jsonify({"error": "No image provided"}), 400
@@ -103,10 +117,7 @@ def predict():
 
 @app.route("/predict-batch", methods=["POST"])
 def predict_batch():
-    """
-    Predict multiple images.
-    Expects JSON with 'images' array of base64-encoded images.
-    """
+    """Predict multiple images."""
     try:
         data = request.get_json()
         if not data or "images" not in data:

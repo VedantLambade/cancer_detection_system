@@ -5,10 +5,12 @@ import numpy as np
 from tensorflow.keras.applications.densenet import preprocess_input
 from PIL import Image
 import io
+import os
+import requests
 
 app = FastAPI()
 
-# Enable CORS for all origins
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,45 +19,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load model once at startup
-print("[v0] Loading TensorFlow model...")
+# Model configuration
+MODEL_URL = "https://huggingface.co/VedantJainnnn/cervixnet121/resolve/main/final_cervix_model_optimized.keras"
+MODEL_LOCAL = "final_cervix_model_optimized.keras"
+THRESHOLD = 0.55
+IMG_SIZE = (288, 288)
+
+# Download model if not exists
+if not os.path.exists(MODEL_LOCAL):
+    print("[v0] Downloading model from Hugging Face...")
+    try:
+        r = requests.get(MODEL_URL, stream=True)
+        with open(MODEL_LOCAL, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print("[v0] Model downloaded successfully!")
+    except Exception as e:
+        print(f"[v0] Error downloading model: {e}")
+
+# Load model
 try:
-    model = tf.keras.models.load_model("final_cervix_model_optimized.keras", compile=False)
+    model = tf.keras.models.load_model(MODEL_LOCAL, compile=False)
     print("[v0] Model loaded successfully!")
 except Exception as e:
     print(f"[v0] Error loading model: {e}")
     model = None
 
+def preprocess_image(image_bytes):
+    """Preprocess image for model inference."""
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize(IMG_SIZE)
+    img_array = np.expand_dims(preprocess_input(np.array(img, dtype=np.float32)), 0)
+    return img_array
+
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    """
-    Predict cervix image classification
-    Returns: {"prediction": "Normal" | "Abnormal", "score": float}
-    """
     try:
         if model is None:
             return {"error": "Model not loaded", "prediction": "Error", "score": 0}
-        
-        # Read and process image
+
         contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB").resize((288, 288))
-        
-        # Preprocess image
-        img_array = np.expand_dims(preprocess_input(np.array(image, dtype=np.float32)), 0)
-        
-        # Make prediction
+        img_array = preprocess_image(contents)
+
         pred = float(model.predict(img_array, verbose=0)[0][0])
-        
-        # Classify based on threshold
-        threshold = 0.55
-        result = "Abnormal" if pred >= threshold else "Normal"
-        
+        result = "Abnormal" if pred >= THRESHOLD else "Normal"
+
         print(f"[v0] Prediction: {result}, Score: {pred:.4f}")
-        
+
         return {
             "prediction": result,
             "score": round(pred, 4),
-            "threshold": threshold,
+            "threshold": THRESHOLD,
             "class": result.lower()
         }
     except Exception as e:
@@ -64,7 +77,6 @@ async def predict(file: UploadFile = File(...)):
 
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
     return {"status": "ok", "model_loaded": model is not None}
 
 if __name__ == "__main__":
