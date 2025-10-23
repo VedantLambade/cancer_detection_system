@@ -28,3 +28,5 @@ next-env.d.ts
 
 # Ignore large Keras model
 final_cervix_model_optimized.keras
+
+.vercel
