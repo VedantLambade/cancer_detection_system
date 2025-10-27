@@ -13,7 +13,7 @@ app = FastAPI()
 # === Enable CORS ===
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (React, Vercel, etc.)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -25,9 +25,14 @@ MODEL_LOCAL = "final_cervix_model_optimized.keras"
 THRESHOLD = 0.55
 IMG_SIZE = (288, 288)
 
+# === Root route for testing ===
+@app.get("/")
+def root():
+    return {"message": "✅ Cervical Cancer Detection API is running!", "predict_endpoint": "/predict"}
+
 # === Download model if not present ===
 if not os.path.exists(MODEL_LOCAL) or os.path.getsize(MODEL_LOCAL) < 1_000_000:
-    print("[Render] Downloading model from Hugging Face...")
+    print("[Render] 📦 Downloading model from Hugging Face...")
     try:
         r = requests.get(MODEL_URL, stream=True)
         r.raise_for_status()
@@ -66,28 +71,30 @@ async def predict(file: UploadFile = File(...)):
             print("[Render] ❌ Model not loaded.")
             return {"error": "Model not loaded", "prediction": "Error", "score": 0}
 
-        print(f"[Render] ✅ Received file: {file.filename}, ContentType: {file.content_type}")
-
+        # ✅ Read file bytes
         contents = await file.read()
         if not contents:
             print("[Render] ⚠️ Empty file received.")
             return {"error": "Empty file", "prediction": "Error", "score": 0}
 
-        # Preprocess the image
+        print(f"[Render] ✅ Received file: {file.filename}, size: {len(contents)} bytes")
+
+        # ✅ Preprocess the image
         try:
             img_array = preprocess_image(contents)
             print("[Render] ✅ Image processed successfully.")
         except Exception as e:
             print(f"[Render] ❌ Image processing error: {e}")
-            return {"error": "Failed to process image", "details": str(e), "prediction": "Error", "score": 0}
+            return {"error": "Failed to process image", "details": str(e)}
 
-        # Perform prediction
+        # ✅ Perform prediction
         try:
             pred = float(model.predict(img_array, verbose=0)[0][0])
         except Exception as e:
             print(f"[Render] ❌ Model prediction error: {e}")
-            return {"error": "Model prediction failed", "details": str(e), "prediction": "Error", "score": 0}
+            return {"error": "Model prediction failed", "details": str(e)}
 
+        # ✅ Format result
         result = "Abnormal" if pred >= THRESHOLD else "Normal"
         print(f"[Render] ✅ Prediction complete → {result} (Score: {pred:.4f})")
 
@@ -95,12 +102,13 @@ async def predict(file: UploadFile = File(...)):
             "prediction": result,
             "score": round(pred, 4),
             "threshold": THRESHOLD,
-            "class": result.lower()
+            "class": result.lower(),
+            "filename": file.filename
         }
 
     except Exception as e:
-        print(f"[Render] ❌ Unexpected error: {e}")
-        return {"error": str(e), "prediction": "Error", "score": 0}
+        print(f"[Render] ❌ Unexpected server error: {e}")
+        return {"error": "Internal server error", "details": str(e)}
 
 # === Health check endpoint ===
 @app.get("/health")
