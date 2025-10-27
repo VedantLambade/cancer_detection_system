@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const formData = new FormData()
     formData.append("file", imageBlob, "cervix.jpg")
 
-    const modelUrl = process.env.MODEL_API_URL || "http://localhost:5000/predict"
+    const modelUrl = process.env.MODEL_API_URL ||"https://cancer-detection-1-2uz2.onrender.com/predict"
     console.log("[v0] Sending to model API:", modelUrl)
 
     const modelResponse = await fetch(modelUrl, {
