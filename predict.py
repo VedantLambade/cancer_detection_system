@@ -3,67 +3,93 @@ from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras.applications.densenet import preprocess_input
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import io
 import os
 import requests
 
 app = FastAPI()
 
-# Enable CORS
+# === Enable CORS ===
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allow all origins (React, Vercel, etc.)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# === Model configuration ===
+# === Configuration ===
 MODEL_URL = "https://huggingface.co/VedantJainnnn/cervixnet121/resolve/main/final_cervix_model_optimized.keras"
 MODEL_LOCAL = "final_cervix_model_optimized.keras"
 THRESHOLD = 0.55
 IMG_SIZE = (288, 288)
 
-# === Download model from Hugging Face if not exists ===
-if not os.path.exists(MODEL_LOCAL):
+# === Download model if not present ===
+if not os.path.exists(MODEL_LOCAL) or os.path.getsize(MODEL_LOCAL) < 1_000_000:
     print("[Render] Downloading model from Hugging Face...")
     try:
         r = requests.get(MODEL_URL, stream=True)
+        r.raise_for_status()
         with open(MODEL_LOCAL, "wb") as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print("[Render] Model downloaded successfully!")
+        print("[Render] ✅ Model downloaded successfully!")
     except Exception as e:
-        print(f"[Render] Error downloading model: {e}")
+        print(f"[Render] ❌ Error downloading model: {e}")
 
 # === Load model ===
 try:
     model = tf.keras.models.load_model(MODEL_LOCAL, compile=False)
-    print("[Render] Model loaded successfully!")
+    print("[Render] ✅ Model loaded successfully!")
 except Exception as e:
-    print(f"[Render] Error loading model: {e}")
+    print(f"[Render] ❌ Error loading model: {e}")
     model = None
 
-# === Preprocess image ===
+# === Image preprocessing ===
 def preprocess_image(image_bytes):
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize(IMG_SIZE)
-    img_array = np.expand_dims(preprocess_input(np.array(img, dtype=np.float32)), 0)
-    return img_array
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img = img.resize(IMG_SIZE)
+        img_array = np.expand_dims(preprocess_input(np.array(img, dtype=np.float32)), 0)
+        return img_array
+    except UnidentifiedImageError:
+        raise ValueError("Invalid or corrupted image file.")
+    except Exception as e:
+        raise ValueError(f"Unexpected image error: {e}")
 
-# === Prediction API ===
+# === Prediction Endpoint ===
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     try:
         if model is None:
+            print("[Render] ❌ Model not loaded.")
             return {"error": "Model not loaded", "prediction": "Error", "score": 0}
 
-        contents = await file.read()
-        img_array = preprocess_image(contents)
-        pred = float(model.predict(img_array, verbose=0)[0][0])
-        result = "Abnormal" if pred >= THRESHOLD else "Normal"
+        print(f"[Render] ✅ Received file: {file.filename}, ContentType: {file.content_type}")
 
-        print(f"[Render] Prediction: {result}, Score: {pred:.4f}")
+        contents = await file.read()
+        if not contents:
+            print("[Render] ⚠️ Empty file received.")
+            return {"error": "Empty file", "prediction": "Error", "score": 0}
+
+        # Preprocess the image
+        try:
+            img_array = preprocess_image(contents)
+            print("[Render] ✅ Image processed successfully.")
+        except Exception as e:
+            print(f"[Render] ❌ Image processing error: {e}")
+            return {"error": "Failed to process image", "details": str(e), "prediction": "Error", "score": 0}
+
+        # Perform prediction
+        try:
+            pred = float(model.predict(img_array, verbose=0)[0][0])
+        except Exception as e:
+            print(f"[Render] ❌ Model prediction error: {e}")
+            return {"error": "Model prediction failed", "details": str(e), "prediction": "Error", "score": 0}
+
+        result = "Abnormal" if pred >= THRESHOLD else "Normal"
+        print(f"[Render] ✅ Prediction complete → {result} (Score: {pred:.4f})")
 
         return {
             "prediction": result,
@@ -71,18 +97,19 @@ async def predict(file: UploadFile = File(...)):
             "threshold": THRESHOLD,
             "class": result.lower()
         }
+
     except Exception as e:
-        print(f"[Render] Prediction error: {e}")
+        print(f"[Render] ❌ Unexpected error: {e}")
         return {"error": str(e), "prediction": "Error", "score": 0}
 
-# === Health check API ===
+# === Health check endpoint ===
 @app.get("/health")
 async def health():
     return {"status": "ok", "model_loaded": model is not None}
 
-# === Entry point ===
+# === Entry point for local testing ===
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 5000))  # Render provides PORT automatically
-    print(f"[Render] Starting FastAPI server on port {port} ...")
+    port = int(os.environ.get("PORT", 5000))
+    print(f"[Render] 🚀 Starting FastAPI server on port {port} ...")
     uvicorn.run(app, host="0.0.0.0", port=port)
