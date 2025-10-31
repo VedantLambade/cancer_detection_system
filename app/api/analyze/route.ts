@@ -1,61 +1,62 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server"
 
 const MODEL_API_URL =
-  process.env.MODEL_API_URL ||
-  "https://cancer-detection-1-2uz2.onrender.com/predict";
+  process.env.MODEL_API_URL || "https://cancer-detection-1-2uz2.onrender.com/predict"
 
 export async function POST(request: NextRequest) {
   try {
-    // 🧩 Expect a FormData upload directly from frontend
-    const formData = await request.formData();
-    const file = formData.get("image") as File | null;
+    console.log("[v0] 🔥 Analyze API triggered")
 
-    if (!file) {
-      console.error("[v0] ❌ No image file found in request.");
-      return NextResponse.json(
-        { error: "No image provided" },
-        { status: 400 }
-      );
+    const { imageUrl } = await request.json().catch(() => ({}))
+    if (!imageUrl) {
+      console.error("[v0] ❌ No imageUrl provided in body")
+      return NextResponse.json({ error: "No image URL provided" }, { status: 400 })
     }
 
-    console.log(`[v0] ✅ Received image: ${file.name} (${file.size} bytes)`);
+    console.log("[v0] 📸 Fetching image from Blob:", imageUrl)
+    const imageResponse = await fetch(imageUrl)
+    if (!imageResponse.ok) {
+      console.error("[v0] ❌ Failed to fetch image:", imageResponse.status, imageResponse.statusText)
+      return NextResponse.json(
+        { error: "Failed to fetch image from Blob", status: imageResponse.status },
+        { status: 400 }
+      )
+    }
 
-    // 🧠 Prepare file for model API
-    const imageBuffer = await file.arrayBuffer();
-    const backendForm = new FormData();
-    backendForm.append("file", new Blob([imageBuffer], { type: file.type }), file.name);
+    const imageBuffer = await imageResponse.arrayBuffer()
+    const imageBlob = new Blob([imageBuffer], { type: "image/jpeg" })
 
-    console.log("[v0] 🔗 Sending image to backend model:", MODEL_API_URL);
+    console.log("[v0] 🚀 Sending image to model:", MODEL_API_URL)
+
+    const formData = new FormData()
+    formData.append("file", imageBlob, "cervix.jpg")
 
     const modelResponse = await fetch(MODEL_API_URL, {
       method: "POST",
-      body: backendForm,
-    });
+      body: formData,
+    })
 
     if (!modelResponse.ok) {
-      const errText = await modelResponse.text();
-      console.error("[v0] ❌ Model API error:", errText);
+      const text = await modelResponse.text()
+      console.error("[v0] ❌ Model API error:", modelResponse.status, text)
       return NextResponse.json(
-        { error: "Model API failed", details: errText },
+        { error: "Model API failed", details: text },
         { status: modelResponse.status }
-      );
+      )
     }
 
-    const prediction = await modelResponse.json();
-    console.log("[v0] ✅ Prediction received:", prediction);
+    const prediction = await modelResponse.json()
+    console.log("[v0] ✅ Model prediction:", prediction)
 
     return NextResponse.json({
       success: true,
-      prediction: prediction.prediction,
-      score: prediction.score,
-      threshold: prediction.threshold,
-      class: prediction.class,
-    });
+      prediction,
+    })
   } catch (error) {
-    console.error("[v0] ❌ Analyze route error:", error);
+    console.error("[v0] 💥 Fatal analyze error:", error)
     return NextResponse.json(
       { error: "Failed to analyze image", details: String(error) },
       { status: 500 }
-    );
+    )
   }
 }
