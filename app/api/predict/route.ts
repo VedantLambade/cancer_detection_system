@@ -6,39 +6,38 @@ const MODEL_API_URL = "https://cancer-detection-1-2uz2.onrender.com/predict";
 
 export async function POST(request: NextRequest) {
   try {
-    // 🧩 Step 1: Get file (image) from the form data
+    // 🧩 Step 1: Get image from the form data
     const formData = await request.formData();
-    const image = formData.get("file") as File | null; // ✅ FIXED: was "image"
+    const image = formData.get("image") as File | null;
 
     if (!image) {
-      console.error("[v0] ❌ No file found in request (expected 'file').");
+      console.error("[v0] ❌ No image found in request.");
       return NextResponse.json(
-        { success: false, error: "No file provided" },
+        { success: false, error: "No image provided" },
         { status: 400 }
       );
     }
 
-    // 🧠 Step 2: Convert file to buffer
+    // 🧠 Step 2: Convert image to buffer
     const imageBuffer = await image.arrayBuffer();
-    console.log(`[v0] ✅ Received file: ${image.name} (${image.size} bytes)`);
+    console.log(`[v0] ✅ Received image: ${image.name} (${image.size} bytes)`);
 
-    // 🪣 Step 3: Upload to Blob Storage (optional)
+    // 🪣 Step 3: Upload to Blob Storage (optional but keeps image reference)
     const imageBlob = new Blob([imageBuffer], { type: image.type });
     let blobUrl = "";
     try {
       blobUrl = await blobService.uploadCervixImage(imageBlob, "temp-" + Date.now());
-      console.log("[v0] ✅ File uploaded to Blob:", blobUrl);
+      console.log("[v0] ✅ Image uploaded to Blob:", blobUrl);
     } catch (uploadError) {
       console.warn("[v0] ⚠️ Blob upload failed, continuing anyway:", uploadError);
     }
 
-    // 🔍 Step 4: Send file to FastAPI backend for prediction
+    // 🔍 Step 4: Send image to FastAPI model backend for prediction
     const backendForm = new FormData();
-    backendForm.append("file", new Blob([imageBuffer], { type: image.type }), image.name); // ✅ Key matches backend
+    backendForm.append("file", new Blob([imageBuffer], { type: image.type }), image.name);
 
     let response;
     try {
-      console.log("[v0] ⏳ Sending file to backend for prediction...");
       response = await fetch(MODEL_API_URL, {
         method: "POST",
         body: backendForm,
