@@ -1,62 +1,89 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server";
 
 const MODEL_API_URL =
-  process.env.MODEL_API_URL || "https://cancer-detection-1-2uz2.onrender.com/predict"
+  process.env.MODEL_API_URL ||
+  "https://cancer-detection-1-2uz2.onrender.com/predict";
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("[v0] 🔥 Analyze API triggered")
+    console.log("[v0] 🔥 Analyze API triggered");
 
-    const { imageUrl } = await request.json().catch(() => ({}))
-    if (!imageUrl) {
-      console.error("[v0] ❌ No imageUrl provided in body")
-      return NextResponse.json({ error: "No image URL provided" }, { status: 400 })
-    }
+    // 🧠 Parse request safely
+    const body = await request.json().catch(() => ({}));
+    const imageUrl = body?.imageUrl;
+    console.log("[v0] 📩 Received imageUrl:", imageUrl);
 
-    console.log("[v0] 📸 Fetching image from Blob:", imageUrl)
-    const imageResponse = await fetch(imageUrl)
-    if (!imageResponse.ok) {
-      console.error("[v0] ❌ Failed to fetch image:", imageResponse.status, imageResponse.statusText)
+    if (!imageUrl || typeof imageUrl !== "string") {
+      console.error("[v0] ❌ Missing or invalid imageUrl");
       return NextResponse.json(
-        { error: "Failed to fetch image from Blob", status: imageResponse.status },
+        { error: "No valid image URL provided" },
         { status: 400 }
-      )
+      );
     }
 
-    const imageBuffer = await imageResponse.arrayBuffer()
-    const imageBlob = new Blob([imageBuffer], { type: "image/jpeg" })
+    // 🚫 Reject blob: or local URLs
+    if (imageUrl.startsWith("blob:") || imageUrl.startsWith("data:")) {
+      console.error("[v0] ❌ Invalid image URL: browser-only blob/data URL");
+      return NextResponse.json(
+        {
+          error:
+            "Invalid image URL. Please upload to a public blob or storage first.",
+        },
+        { status: 400 }
+      );
+    }
 
-    console.log("[v0] 🚀 Sending image to model:", MODEL_API_URL)
+    // 🧩 Fetch the image from public blob or Firebase
+    console.log("[v0] 📸 Fetching image from:", imageUrl);
+    const imageResponse = await fetch(imageUrl);
+    if (!imageResponse.ok) {
+      console.error(
+        "[v0] ❌ Failed to fetch image:",
+        imageResponse.status,
+        imageResponse.statusText
+      );
+      return NextResponse.json(
+        { error: "Failed to fetch image", status: imageResponse.status },
+        { status: 400 }
+      );
+    }
 
-    const formData = new FormData()
-    formData.append("file", imageBlob, "cervix.jpg")
+    // Convert to Blob
+    const imageBuffer = await imageResponse.arrayBuffer();
+    const imageBlob = new Blob([imageBuffer], { type: "image/jpeg" });
+
+    // 🔥 Send image to model backend
+    console.log("[v0] 🚀 Sending to model:", MODEL_API_URL);
+    const formData = new FormData();
+    formData.append("file", imageBlob, "cervix.jpg");
 
     const modelResponse = await fetch(MODEL_API_URL, {
       method: "POST",
       body: formData,
-    })
+    });
 
     if (!modelResponse.ok) {
-      const text = await modelResponse.text()
-      console.error("[v0] ❌ Model API error:", modelResponse.status, text)
+      const errText = await modelResponse.text();
+      console.error("[v0] ❌ Model API error:", modelResponse.status, errText);
       return NextResponse.json(
-        { error: "Model API failed", details: text },
+        { error: "Model API failed", details: errText },
         { status: modelResponse.status }
-      )
+      );
     }
 
-    const prediction = await modelResponse.json()
-    console.log("[v0] ✅ Model prediction:", prediction)
+    // ✅ Success
+    const prediction = await modelResponse.json();
+    console.log("[v0] ✅ Model prediction:", prediction);
 
     return NextResponse.json({
       success: true,
       prediction,
-    })
+    });
   } catch (error) {
-    console.error("[v0] 💥 Fatal analyze error:", error)
+    console.error("[v0] 💥 Fatal analyze error:", error);
     return NextResponse.json(
       { error: "Failed to analyze image", details: String(error) },
       { status: 500 }
-    )
+    );
   }
 }
